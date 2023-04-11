@@ -1,0 +1,186 @@
+
+clc;
+close all;
+clear all;
+
+disp('Reading g-eqdsk file');
+
+
+% Read an g-eqdsk file
+filename= '/Users/78k/Desktop/myRepos/GITR_processing/cmod/g1050426022.01300';
+g = readg_g3d(filename);
+
+% Plot poloidal magnetic field flux
+hold on
+contour(g.r,g.z,g.psirz', 'LineWidth', 1);
+plot(g.lim(1,:),g.lim(2,:),'LineWidth', 1);
+
+set(gca,'FontName','times','fontSize',24);
+ylabel('$z$ [m$^{-3}$]','interpreter','Latex','fontSize',24)
+xlabel('$r$ [m]','interpreter','latex','fontSize',24)
+%% Calculate B-field and write it in .csv and .nc format
+disp('Writing the B-field profiles');
+
+
+nR = 100;
+nZ = 200;
+offset = 3;
+r=linspace(g.r(1+offset),g.r(end-offset),nR);
+z=linspace(g.z(1+offset),g.z(end-offset),nZ);
+[r2D,z2D] = meshgrid(r,z);
+[Bout,ierr] = bfield_geq_bicub(g,r2D(:),z2D(:));
+
+[psiN,psi] = calc_psiN(g,r2D(:),z2D(:),[])
+psi=reshape(psi,[nZ,nR]);
+psiN=reshape(psiN,[nZ,nR]);
+
+figure;
+hold on
+contour(r,z,psi,'LineWidth',2);
+plot(g.lim(1,:),g.lim(2,:),'r','LineWidth',5);
+hold off
+
+figure;
+hold on
+contour(r,z,psiN,'LineWidth',2);
+plot(g.lim(1,:),g.lim(2,:),'r','LineWidth',5);
+hold off
+
+% [rho,R,Rsep] = calc_rho_midplane_map(g,r2D(:),z2D(:))
+Br = reshape(Bout.br,[nZ,nR]);
+Bt = reshape(Bout.bphi,[nZ,nR]);
+Bz = reshape(Bout.bz,[nZ,nR]);
+
+writematrix(r,'r.csv');
+writematrix(z,'z.csv');
+writematrix(Br,'Br.csv');
+writematrix(Bt,'Bt.csv');
+writematrix(Bz,'Bz.csv');
+
+ncid = netcdf.create(('./bfield_cmod.nc'),'NC_WRITE');
+
+dimR = netcdf.defDim(ncid,'nX',nR);
+
+dimZ = netcdf.defDim(ncid,'nZ',nZ);
+
+gridRnc = netcdf.defVar(ncid,'x','float',dimR);
+
+gridZnc = netcdf.defVar(ncid,'z','float',dimZ);
+
+brnc = netcdf.defVar(ncid,'br','float',[dimR dimZ]);
+btnc = netcdf.defVar(ncid,'bt','float',[dimR dimZ]);
+bznc = netcdf.defVar(ncid,'bz','float',[dimR dimZ]);
+
+netcdf.endDef(ncid);
+% 
+netcdf.putVar(ncid,gridRnc,r);
+netcdf.putVar(ncid,gridZnc,z);
+
+
+netcdf.putVar(ncid,brnc,Br');
+netcdf.putVar(ncid,btnc,Bt');
+netcdf.putVar(ncid,bznc,Bz');
+
+netcdf.close(ncid);
+
+hold off
+
+% Quiver plot for Br, Bz
+figure
+quiver(r,z,Br,Bz,5)
+hold on
+contour(g.r,g.z,g.psirz','LineWidth',2);
+plot(g.lim(1,:),g.lim(2,:),'LineWidth',5);
+hold off
+set(gca,'FontName','times','fontSize',24);
+ylabel('$z$ [m]','interpreter','Latex','fontSize',24)
+xlabel('$r$ [m]','interpreter','latex','fontSize',24)
+xlim([0.4 1.1])
+
+disp('Calculated the B-field profile');
+
+
+%% Calculate density and write it in .csv and .nc format
+disp('Writing the density profiles');
+
+ff=load('density_1050426022.txt');
+r1=ff(:,1)./100; % in meters
+ne1=ff(:,2).*1E20; % m^-3
+figure;
+plot(r1,ne1)
+
+nZ_n=100;
+nR_n=200;
+rmax=max(r1);
+rmin=min(r1);
+z=linspace(-0.4,0.4,nZ_n);
+r=linspace(rmin,rmax,nR_n);
+
+ne = interp1(r1,ne1,r);
+
+ne = repmat(ne,[nZ_n,1]);
+ni=ne;
+
+ne(isnan(ne)) = 0;
+figure;
+pcolor(r,z,ne)
+
+
+
+
+ncid = netcdf.create(('./density_cmod.nc'),'NC_WRITE');
+dimR = netcdf.defDim(ncid,'nX_n',nR_n);
+
+dimZ = netcdf.defDim(ncid,'nZ_n',nZ_n);
+
+gridRnc = netcdf.defVar(ncid,'gridx_n','float',dimR);
+
+gridZnc = netcdf.defVar(ncid,'gridz_n','float',dimZ);
+
+nenc = netcdf.defVar(ncid,'ne','float',[dimR dimZ]);
+ninc = netcdf.defVar(ncid,'ni','float',[dimR dimZ]);
+
+
+netcdf.endDef(ncid);
+% 
+netcdf.putVar(ncid,gridRnc,r);
+netcdf.putVar(ncid,gridZnc,z);
+
+
+netcdf.putVar(ncid,nenc,ne);
+netcdf.putVar(ncid,ninc,ni);
+
+
+netcdf.close(ncid);
+
+
+ function n = myfun(rho)
+        
+        mask1 = rho<1;
+        mask2 = rho>=1;
+
+
+     
+        N1 = numel(rho(:,1));
+        N2= numel(rho(1,:));
+        for i=1:N1
+            for j=1:N2
+        n1(i,j) = fun1(rho(i,j));
+        n2(i,j) = fun2(rho(i,j));
+            end
+        end
+        
+        n2 = n2 .* mask2;
+        n2 = n2 .* ((1-sol_rolloff.*rho_max)+sol_rolloff .* rho); % make sinh steeper near the pedestal
+        n2 = (n2-min(n2)) ./ (max(n2)-min(n2)) .* (n_rho1-n_rho_max) + n_rho1;
+        
+        n = n1 .* mask1 + n2 .* mask2;
+        
+% %          plot(rho,((1-sol_rolloff*rho_max)+sol_rolloff .* rho))
+%         figure
+%         plot(rho,n1.*mask1)
+%         figure
+%         plot(rho,n2.*mask2)
+%         
+    end
+
