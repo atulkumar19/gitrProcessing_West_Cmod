@@ -47,4 +47,7 @@ plot(g.lim(1,:),g.lim(2,:),'b-','linewidth',2)
 colorbar;
 axis equal;
 
+figure; 
+plot(r, [density(:, 100);0])
+
     
